@@ -2,7 +2,7 @@
 
 module ViewDBI
 
-import Base: show, contains, hash
+import Base: show, contains
 import Base.Meta.isexpr
 import ODBC
 import DataFrames
@@ -61,21 +61,17 @@ type TableView <: DbView
     pk::Key
     prepare_fn#::Function
     transform_fn#::Function
-    has_one::Dict{TableView,(Key,Key)}
-    has_many::Dict{TableView,(Key,Key)}
-    belongs_to::Dict{TableView,(Key,Key)}
-    many_to_many::Dict{TableView,(TableView,Key,Key,Key,Key)}
+    has_one::Dict{Symbol, (Key,TableView,Key)}
+    has_many::Dict{Symbol, (Key,TableView,Key)}
+    belongs_to::Dict{Symbol, (Key,TableView,Key)}
+    many_to_many::Dict{Symbol, (Key,TableView,Key,Key,TableView,Key)}
 
     cols
     keyinfo
     #rkeyinfo
 end
 
-const VIEW_HASH=hash(TableView)
-
-hash(en::TableView) = bitmix(VIEW_HASH, hash(en.name))
-
-typealias ViewRelation Dict{TableView,(Key,Key)}
+typealias ViewRelation Dict{Symbol, (Key,TableView,Key)}
 
 function TableView(name::Symbol, vdb::ViewDB; schema=vdb.schema, table=name, fields=Symbol[], args...)
     table = symbol(table)
@@ -92,10 +88,10 @@ function TableView(name::Symbol, vdb::ViewDB; schema=vdb.schema, table=name, fie
 
     TableView(name, vdb, schema, table, fields, pk, 
            nothing, nothing, 
-           (TableView=>(Key,Key))[], 
-           (TableView=>(Key,Key))[], 
-           (TableView=>(Key,Key))[], 
-           (TableView=>(TableView,Key,Key,Key,Key))[],
+           (Symbol=>(Key,TableView,Key))[], 
+           (Symbol=>(Key,TableView,Key))[], 
+           (Symbol=>(Key,TableView,Key))[], 
+           (Symbol=>(Key,TableView,Key,Key,TableView,Key))[],
            cols, keyinfo)
 end
 
@@ -108,10 +104,10 @@ function show(io::IO, v::TableView)
     print(io, ", ", "pk=", v.pk) 
     print(io, ", ", "prepare_fn=", v.prepare_fn == nothing ? "nothing" : v.prepare_fn.env.name)
     print(io, ", ", "transform_fn=", v.transform_fn == nothing ? "nothing" : v.transform_fn.env.name)
-    print(io, ", ", "has_one=",{x.name for x in keys(v.has_one)})
-    print(io, ", ", "has_many=",{x.name for x in keys(v.has_many)})
-    print(io, ", ", "belongs_to=",{x.name for x in keys(v.belongs_to)})
-    print(io, ", ", "many_to_many=",{x.name for x in keys(v.many_to_many)}, ")")
+    print(io, ", ", "has_one=",collect(keys(v.has_one)))
+    print(io, ", ", "has_many=",collect(keys(v.has_many)))
+    print(io, ", ", "belongs_to=",collect(keys(v.belongs_to)))
+    print(io, ", ", "many_to_many=",collect(keys(v.many_to_many)), ")")
 end
 
 function get_joinkey(main::TableView, other::TableView, mainkey::Key=main.pk)
@@ -121,7 +117,7 @@ function get_joinkey(main::TableView, other::TableView, mainkey::Key=main.pk)
             return testkey
         end
     end
-    error("get_joinkey: no key found to join Entities")
+    error("get_joinkey: no key found to join Entities; please specify key manually")
 end
 
 function linkup(main::TableView, relmain::ViewRelation, 
@@ -135,8 +131,8 @@ function linkup(main::TableView, relmain::ViewRelation,
     @assert(typeof(mainkey) == typeof(key))
     @assert(!isa(mainkey, Vector) || length(mainkey) == length(key))
 
-    relmain[sub] = (mainkey, key)
-    relsub[main] = (key, mainkey)
+    relmain[sub.name] = (mainkey, sub, key)
+    relsub[main.name] = (key, main, mainkey)
 
     nothing
 end
@@ -160,8 +156,8 @@ function many_to_many(ent1::TableView, ent2::TableView, joinent::TableView; entk
     @assert(!isa(entkey1, Vector) || length(entkey1) == length(joinkey1))
     @assert(!isa(entkey2, Vector) || length(entkey2) == length(joinkey2))
 
-    ent1.many_to_many[entkey1] = (joinent, joinkey1, joinkey2, ent2, entkey2)
-    ent2.many_to_many[entkey2] = (joinent, joinkey2, joinkey1, ent1, entkey1)
+    ent1.many_to_many[ent2.name] = (entkey1, joinent, joinkey1, joinkey2, ent2, entkey2)
+    ent2.many_to_many[ent1.name] = (entkey2, joinent, joinkey2, joinkey1, ent1, entkey1)
 
     nothing
 end
